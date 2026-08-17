@@ -1,10 +1,24 @@
 import argparse
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import ollama
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def build_recording_name(recording_name, recording_time, duration_minutes):
+    try:
+        start_time = datetime.strptime(recording_time, "%H%M")
+    except ValueError as error:
+        raise ValueError("Recording time must use HHMM format, for example 1914") from error
+
+    end_time = start_time + timedelta(minutes=duration_minutes)
+    base_name = Path(recording_name).name
+    if base_name.lower().endswith((".mp3", ".txt")):
+        base_name = base_name[:-4]
+    return f"{base_name}_{start_time:%H%M}_{end_time:%H%M}"
 
 
 def find_audio_path(radio_name, recording_date, recording_name):
@@ -68,16 +82,20 @@ def transcribe_via_ollama(audio_file_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("recording_name", nargs="?", default="Avto_99.9_1914_1921", help="Audio recording name, with or without .mp3")
-    parser.add_argument("recording_date", nargs="?", default="2026-08-15", help="Audio recording date folder in YYYY-MM-DD format")
+    parser.add_argument("recording_name", nargs="?", default="Avto_99.9", help="Audio recording base name, for example Avto_99.9")
+    parser.add_argument("recording_time", nargs="?", default="1914", help="Recording start time in HHMM format, for example 1914")
+    parser.add_argument("recording_date", nargs="?", default="2026-08-16", help="Audio recording date folder in YYYY-MM-DD format")
     parser.add_argument("radio_name", nargs="?", default="autoradio", help="Radio station name")
+    parser.add_argument("--duration-minutes", type=int, default=7, help="Recording duration in minutes")
     args = parser.parse_args()
 
     try:
-        audio_path = find_audio_path(args.radio_name, args.recording_date, args.recording_name)
+        recording_name = build_recording_name(
+            args.recording_name, args.recording_time, args.duration_minutes
+        )
+        audio_path = find_audio_path(args.radio_name, args.recording_date, recording_name)
         text = transcribe_via_ollama(audio_path)
         output_path = save_transcription(audio_path, text)
-        print("\n✨ Ollama Qwen ASR Output:\n", text)
         print(f"\n💾 Transcription saved to: {output_path}")
     except Exception as e:
         print(f"❌ Error: {e}")
