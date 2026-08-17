@@ -1,0 +1,7 @@
+*.mp3
+*.wav
+*.log*
+*.db
+*.txt
+*.yml
+*.pyc

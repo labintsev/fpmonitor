@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Radio Airplay Archive</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<div class="app">
+
+    <header class="header">
+        <div>
+            <h1>Radio Airplay</h1>
+            <p>Архив рекламных роликов в эфире</p>
+        </div>
+    </header>
+
+
+    <main class="content">
+
+        <section class="panel">
+
+            <div class="panel-header">
+                <div>
+                    <h2>Эфир</h2>
+                    <span id="resultInfo">
+                        Выберите дату и час
+                    </span>
+                </div>
+            </div>
+
+
+            <div class="filters">
+
+                <div class="field">
+
+                    <label for="date">
+                        Дата
+                    </label>
+
+                    <input
+                        type="date"
+                        id="date"
+                    >
+
+                </div>
+
+
+                <div class="field">
+
+                    <label for="hour">
+                        Час
+                    </label>
+
+                    <select id="hour">
+
+                        <option value="">
+                            Выберите час
+                        </option>
+
+                        <option value="0">00:00 — 00:59</option>
+                        <option value="1">01:00 — 01:59</option>
+                        <option value="2">02:00 — 02:59</option>
+                        <option value="3">03:00 — 03:59</option>
+                        <option value="4">04:00 — 04:59</option>
+                        <option value="5">05:00 — 05:59</option>
+                        <option value="6">06:00 — 06:59</option>
+                        <option value="7">07:00 — 07:59</option>
+                        <option value="8">08:00 — 08:59</option>
+                        <option value="9">09:00 — 09:59</option>
+                        <option value="10">10:00 — 10:59</option>
+                        <option value="11">11:00 — 11:59</option>
+                        <option value="12">12:00 — 12:59</option>
+                        <option value="13">13:00 — 13:59</option>
+                        <option value="14">14:00 — 14:59</option>
+                        <option value="15">15:00 — 15:59</option>
+                        <option value="16">16:00 — 16:59</option>
+                        <option value="17">17:00 — 17:59</option>
+                        <option value="18">18:00 — 18:59</option>
+                        <option value="19">19:00 — 19:59</option>
+                        <option value="20">20:00 — 20:59</option>
+                        <option value="21">21:00 — 21:59</option>
+                        <option value="22">22:00 — 22:59</option>
+                        <option value="23">23:00 — 23:59</option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+
+            <div class="textarea-wrapper">
+
+                <div class="textarea-header">
+
+                    <span>Ролики в эфире</span>
+
+                    <span
+                        id="count"
+                        class="count"
+                    >
+                        0
+                    </span>
+
+                </div>
+
+
+                <textarea
+                    id="plays"
+                    readonly
+                    placeholder="Здесь появятся ролики..."
+                ></textarea>
+
+            </div>
+
+
+            <div
+                id="loading"
+                class="loading hidden"
+            >
+                Загрузка...
+            </div>
+
+
+            <div
+                id="error"
+                class="error hidden"
+            ></div>
+
+        </section>
+
+    </main>
+
+</div>
+
+
+<script
+    src="{{ url_for('static', filename='app.js') }}"
+></script>
+
+</body>
+</html>
