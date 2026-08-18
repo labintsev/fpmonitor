@@ -1,5 +1,7 @@
+import argparse
 import os
 import time
+from pathlib import Path
 import logging
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
@@ -18,12 +20,12 @@ except AttributeError:
 # ============================================================
 # CONFIG
 # ============================================================
-
-STREAM_URL = "http://live.radio-city.fm/Avto_99.9"
-
-OUTPUT_DIR = "recorder/audio/autoradio"
-LOG_DIR = os.path.join(OUTPUT_DIR, "logs")
-LOG_FILE = os.path.join(LOG_DIR, "recorder.log")
+BASE_DIR = Path(__file__).parent.resolve()
+AUDIO_STREAM_TYPE = "auto"
+# Will be set in main()
+STREAM_URL = None
+AUDIO_DIR = None  
+LOGGER = None
 
 # Записываем:
 # XX:15:00 -> XX:25:00
@@ -35,7 +37,7 @@ RECORDING_WINDOWS = [
 ]
 
 READ_TIMEOUT = 30
-TARGET_SAMPLE_RATE = 44100
+TARGET_SAMPLE_RATE = 16000
 TARGET_LAYOUT = "stereo"
 TARGET_FORMAT = "fltp"
 
@@ -47,8 +49,8 @@ USER_AGENT = (
 )
 
 
-def setup_logger():
-    os.makedirs(LOG_DIR, exist_ok=True)
+def setup_logger(log_dir, log_file):
+    os.makedirs(log_dir, exist_ok=True)
 
     logger = logging.getLogger("recorder")
     logger.setLevel(logging.INFO)
@@ -58,7 +60,7 @@ def setup_logger():
         return logger
 
     handler = TimedRotatingFileHandler(
-        LOG_FILE,
+        log_file,
         when="midnight",
         interval=1,
         backupCount=30,
@@ -74,9 +76,6 @@ def setup_logger():
     logger.addHandler(handler)
 
     return logger
-
-
-logger = setup_logger()
 
 
 # ============================================================
@@ -165,20 +164,18 @@ def make_filename(start_time, end_time):
       audio/
         autoradio/
           2026-08-14/
-            Avto_99.9_1415_1425.mp3
+            14-15-03.mp3
     """
 
     date_dir = os.path.join(
-        OUTPUT_DIR,
+        AUDIO_DIR,
         start_time.strftime("%Y-%m-%d"),
     )
 
     os.makedirs(date_dir, exist_ok=True)
 
     filename = (
-        f"Avto_99.9_"
-        f"{start_time.strftime('%H%M')}_"
-        f"{end_time.strftime('%H%M')}.mp3"
+        f"{start_time.strftime('%H-%M-%S')}.mp3"
     )
 
     return os.path.join(date_dir, filename)
@@ -194,25 +191,22 @@ def record_stream(start_time, end_time):
     encode to MP3 and save until end_time.
     """
 
-    filename = make_filename(start_time, end_time)
-
-    logger.info("=" * 70)
-    logger.info(f"Recording: {start_time:%Y-%m-%d %H:%M:%S}")
-    logger.info(f"Until:     {end_time:%Y-%m-%d %H:%M:%S}")
-    logger.info(f"File:      {filename}")
-    logger.info("=" * 70)
+    LOGGER.info("=" * 70)
+    LOGGER.info(f"Recording: {start_time:%Y-%m-%d %H:%M:%S}")
+    LOGGER.info(f"Until:     {end_time:%Y-%m-%d %H:%M:%S}")
+    LOGGER.info("=" * 70)
 
     while True:
 
         now = datetime.now()
 
         if now >= end_time:
-            logger.info("Recording window finished.")
+            LOGGER.info("Recording window finished.")
             break
 
         try:
 
-            logger.info("Connecting to stream...")
+            LOGGER.info("Connecting to stream...")
 
             bytes_written = 0
             started = time.monotonic()
@@ -223,11 +217,21 @@ def record_stream(start_time, end_time):
                 "user_agent": USER_AGENT,
             }
 
-            with av.open(
-                STREAM_URL,
-                mode="r",
-                options=input_options,
-            ) as input_container, av.open(
+            open_kwargs = {
+                "mode": "r",
+                "options": input_options,
+            }
+            if AUDIO_STREAM_TYPE != "auto":
+                open_kwargs["format"] = AUDIO_STREAM_TYPE
+
+            input_container = av.open(STREAM_URL, **open_kwargs)
+
+            recording_start = datetime.now()
+            filename = make_filename(recording_start, end_time)
+            LOGGER.info(f"Recording started: {recording_start:%Y-%m-%d %H:%M:%S}")
+            LOGGER.info(f"File:              {filename}")
+
+            with input_container, av.open(
                 filename,
                 mode="w",
                 format="mp3",
@@ -239,7 +243,7 @@ def record_stream(start_time, end_time):
                     if stream.type == "audio"
                 )
 
-                logger.info(
+                LOGGER.info(
                     "Input codec: %s | rate: %s Hz | channels: %s",
                     input_stream.codec_context.name,
                     input_stream.codec_context.sample_rate,
@@ -258,60 +262,59 @@ def record_stream(start_time, end_time):
                     rate=TARGET_SAMPLE_RATE,
                 )
 
-                for packet in input_container.demux(input_stream):
-
-                    now = datetime.now()
-
-                    # Stop exactly at the end of the window.
-                    if now >= end_time:
-                        break
-
-                    for frame in packet.decode():
+                stopped_by_user = False
+                try:
+                    for packet in input_container.demux(input_stream):
 
                         now = datetime.now()
 
+                        # Stop exactly at the end of the window.
                         if now >= end_time:
                             break
 
-                        resampled_frames = resampler.resample(frame)
+                        for frame in packet.decode():
 
-                        if not isinstance(resampled_frames, list):
-                            resampled_frames = [resampled_frames]
+                            now = datetime.now()
 
-                        for resampled_frame in resampled_frames:
+                            if now >= end_time:
+                                break
 
-                            if resampled_frame is None:
-                                continue
+                            resampled_frames = resampler.resample(frame)
 
-                            encoded_packets = output_stream.encode(
-                                resampled_frame
-                            )
+                            if not isinstance(resampled_frames, list):
+                                resampled_frames = [resampled_frames]
 
-                            for encoded_packet in encoded_packets:
-                                bytes_written += encoded_packet.size
-                                output_container.mux(encoded_packet)
+                            for resampled_frame in resampled_frames:
 
-                        elapsed = time.monotonic() - started
-                        elapsed_second = int(elapsed)
+                                if resampled_frame is None:
+                                    continue
 
-                        if (
-                            elapsed_second % 5 == 0
-                            and elapsed_second != last_report_second
-                        ):
-                            last_report_second = elapsed_second
-                            mb = bytes_written / 1024 / 1024
-                            logger.info(
-                                f"Encoded MP3: {mb:.2f} MB"
-                            )
+                                encoded_packets = output_stream.encode(
+                                    resampled_frame
+                                )
+
+                                for encoded_packet in encoded_packets:
+                                    bytes_written += encoded_packet.size
+                                    output_container.mux(encoded_packet)
+
+                    mb = bytes_written / 1024 / 1024
+                    LOGGER.info(f"Encoded MP3: {mb:.2f} MB")
+                    
+                except KeyboardInterrupt:
+                    stopped_by_user = True
+                    LOGGER.info("Stopping recording and saving the file...")
 
                 for encoded_packet in output_stream.encode(None):
                     bytes_written += encoded_packet.size
                     output_container.mux(encoded_packet)
 
                 if bytes_written > 0:
-                    logger.info(
+                    LOGGER.info(
                         f"Saved {bytes_written / 1024 / 1024:.2f} MB"
                     )
+
+                if stopped_by_user:
+                    return
 
                 return
 
@@ -322,7 +325,7 @@ def record_stream(start_time, end_time):
             ValueError,
         ) as e:
 
-            logger.error(
+            LOGGER.error(
                 f"Stream error: {e}"
             )
 
@@ -334,14 +337,14 @@ def record_stream(start_time, end_time):
             if remaining <= 0:
                 break
 
-            logger.info(
+            LOGGER.info(
                 "Retrying in 3 seconds..."
             )
 
             time.sleep(3)
 
         except Exception as e:
-            logger.exception(
+            LOGGER.exception(
                 "Unexpected recorder failure: %s",
                 e,
             )
@@ -353,7 +356,7 @@ def record_stream(start_time, end_time):
             if remaining <= 0:
                 break
 
-            logger.info(
+            LOGGER.info(
                 "Retrying in 3 seconds..."
             )
 
@@ -361,7 +364,7 @@ def record_stream(start_time, end_time):
 
         except KeyboardInterrupt:
 
-            logger.info("Stopped by user.")
+            LOGGER.info("Stopped by user.")
             return
 
 
@@ -370,16 +373,41 @@ def record_stream(start_time, end_time):
 # ============================================================
 
 def main():
+    global STREAM_URL, AUDIO_STREAM_TYPE, AUDIO_DIR, LOGGER
 
-    logger.info("=" * 70)
-    logger.info("Radio recorder")
-    logger.info(STREAM_URL)
-    logger.info("=" * 70)
-
-    os.makedirs(
-        OUTPUT_DIR,
-        exist_ok=True
+    parser = argparse.ArgumentParser(description="Record the radio stream on schedule")
+    parser.add_argument(
+        "--stream-url",
+        default="https://stream.autoradio.ru/autoradio",
+        help="Audio stream URL",
     )
+    parser.add_argument(
+        "--stream-type",
+        choices=("auto", "mp3", "aac"),
+        default="auto",
+        help="Input stream type; auto lets FFmpeg detect it",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="autoradio",
+        help="Directory where dated recordings and logs are stored",
+    )
+    args = parser.parse_args()
+
+    STREAM_URL = args.stream_url
+    AUDIO_STREAM_TYPE = args.stream_type
+    AUDIO_DIR = Path(BASE_DIR / "audio" / args.output_dir)
+    log_dir = AUDIO_DIR / "logs"
+    log_file = log_dir / "recorder.log"
+    LOGGER = setup_logger(log_dir, log_file)
+
+    LOGGER.info("=" * 70)
+    LOGGER.info("Radio recorder")
+    LOGGER.info(STREAM_URL)
+    LOGGER.info(f"Stream type: {AUDIO_STREAM_TYPE}")
+    LOGGER.info("=" * 70)
+
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
     while True:
 
@@ -407,12 +435,12 @@ def main():
             (next_start - now).total_seconds(),
         )
 
-        logger.info(
+        LOGGER.info(
             f"Next recording: "
             f"{next_start:%Y-%m-%d %H:%M:%S}"
         )
 
-        logger.info(
+        LOGGER.info(
             f"Waiting {wait_seconds:.0f} seconds..."
         )
 
@@ -422,7 +450,7 @@ def main():
             )
 
         except KeyboardInterrupt:
-            logger.info("Stopped by user.")
+            LOGGER.info("Stopped by user.")
             break
 
 
