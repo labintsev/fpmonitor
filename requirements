@@ -1,0 +1,4 @@
+flask
+av
+ollama
+pyacoustid # with fpcalc backend

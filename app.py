@@ -31,6 +31,19 @@ def init_db():
         ON radio_plays (air_date, air_time)
     """)
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS audio_chunk_fingerprints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            audio_file TEXT NOT NULL,
+            chunk_start REAL NOT NULL,
+            chunk_end REAL NOT NULL,
+            duration REAL NOT NULL,
+            fingerprint TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (audio_file, chunk_start, chunk_end)
+        )
+    """)
+
     conn.commit()
     conn.close()
 

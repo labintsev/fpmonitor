@@ -1,5 +1,5 @@
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import av
@@ -14,47 +14,57 @@ CHUNK_SECONDS = 6
 OVERLAP_SECONDS = 1
 
 
-def build_recording_name(recording_name, recording_time, duration_minutes):
+def find_audio_path(audio_file):
+    audio_path = Path(audio_file)
+    if not audio_path.is_absolute():
+        audio_path = BASE_DIR / audio_path
+    audio_path = audio_path.resolve()
+
+    audio_root = (BASE_DIR / "recorder" / "audio").resolve()
     try:
-        start_time = datetime.strptime(recording_time, "%H%M")
-    except ValueError as error:
-        raise ValueError("Recording time must use HHMM format, for example 1914") from error
-
-    end_time = start_time + timedelta(minutes=duration_minutes)
-    base_name = Path(recording_name).name
-    if base_name.lower().endswith((".mp3", ".txt")):
-        base_name = base_name[:-4]
-    return f"{base_name}_{start_time:%H%M}_{end_time:%H%M}"
-
-
-def find_audio_path(radio_name, recording_date, recording_name):
-    audio_root = BASE_DIR / "recorder" / "audio" / radio_name / recording_date
-    filename = Path(recording_name).name
-    if filename.lower().endswith(".mp3"):
-        filename = filename[:-4]
-    filename = f"{filename}.mp3"
-    matches = list(audio_root.glob(filename))
-
-    if not matches:
-        raise FileNotFoundError(f"Audio file not found: {filename}")
-    if len(matches) > 1:
-        raise ValueError(f"More than one audio file found: {filename}")
-
-    return matches[0]
-
-
-def get_transcription_path(audio_file_path):
-    audio_path = Path(audio_file_path).resolve()
-    try:
-        station, air_date, filename = audio_path.relative_to(
-            BASE_DIR / "recorder" / "audio"
-        ).parts
+        audio_path.relative_to(audio_root)
     except ValueError as error:
         raise ValueError(
             "Audio file must be located in recorder/audio/<station>/<date>/"
         ) from error
 
-    return BASE_DIR / "asr" / "text" / station / air_date / f"{Path(filename).stem}.txt"
+    if audio_path.suffix.lower() != ".mp3":
+        raise ValueError(f"Audio file must have an .mp3 extension: {audio_path}")
+    if not audio_path.is_file():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    return audio_path
+
+
+def get_transcription_path(audio_file_path):
+    audio_path = Path(audio_file_path).resolve()
+    audio_root = (BASE_DIR / "recorder" / "audio").resolve()
+    try:
+        station, air_date, filename = audio_path.relative_to(audio_root).parts
+    except ValueError as error:
+        raise ValueError(
+            "Audio file must be located in recorder/audio/<station>/<date>/"
+        ) from error
+
+    recording_time = get_recording_start_time(filename)
+
+    return (
+        BASE_DIR
+        / "asr"
+        / "text"
+        / station
+        / air_date
+        / f"{recording_time:%H-%M-%S}.txt"
+    )
+
+
+def get_recording_start_time(audio_filename):
+    try:
+        return datetime.strptime(Path(audio_filename).stem, "%H-%M-%S")
+    except ValueError as error:
+        raise ValueError(
+            "Audio file name must use HH-MM-SS.mp3 format, for example 18-14-00.mp3"
+        ) from error
 
 
 def format_timestamp(total_seconds):
@@ -234,12 +244,18 @@ def transcribe_chunked_audio(
 def save_transcription(audio_file_path, segments):
     transcription_path = get_transcription_path(audio_file_path)
     transcription_path.parent.mkdir(parents=True, exist_ok=True)
+    recording_start_time = get_recording_start_time(audio_file_path)
+    recording_start = (
+        recording_start_time.hour * 3600
+        + recording_start_time.minute * 60
+        + recording_start_time.second
+    )
 
     if isinstance(segments, str):
         text = segments
     else:
         text = "\n".join(
-            f"{format_timestamp(item['start'])} - {item['text']}"
+            f"{format_timestamp(recording_start + item['start'])} - {item['text']}"
             for item in segments
         )
     
@@ -250,34 +266,10 @@ def save_transcription(audio_file_path, segments):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "recording_name",
+        "audio_file",
         nargs="?",
-        default="Avto_99.9",
-        help="Audio recording base name, for example Avto_99.9",
-    )
-    parser.add_argument(
-        "recording_time",
-        nargs="?",
-        default="1914",
-        help="Recording start time in HHMM format, for example 1914",
-    )
-    parser.add_argument(
-        "recording_date",
-        nargs="?",
-        default="2026-08-16",
-        help="Audio recording date folder in YYYY-MM-DD format",
-    )
-    parser.add_argument(
-        "radio_name",
-        nargs="?",
-        default="autoradio",
-        help="Radio station name",
-    )
-    parser.add_argument(
-        "--duration-minutes",
-        type=int,
-        default=7,
-        help="Recording duration in minutes",
+        default="recorder/audio/dubna-marusya/2026-08-18/18-14-00.mp3",
+        help="Path to the MP3 file, relative to the project root",
     )
     parser.add_argument(
         "--chunk-seconds",
@@ -294,10 +286,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        recording_name = build_recording_name(
-            args.recording_name, args.recording_time, args.duration_minutes
-        )
-        audio_path = find_audio_path(args.radio_name, args.recording_date, recording_name)
+        audio_path = find_audio_path(args.audio_file)
         segments = transcribe_chunked_audio(
             audio_path,
             chunk_seconds=args.chunk_seconds,

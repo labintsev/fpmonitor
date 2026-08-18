@@ -4,4 +4,5 @@
 *.db
 *.txt
 *.yml
+*.json
 *.pyc

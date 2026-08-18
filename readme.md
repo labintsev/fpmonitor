@@ -42,3 +42,21 @@ RADIO audio stream
 recorder\audio\autoradio\2026-08-17\Avto_99.9_0944_0951.mp3
 
 
+## 2.2 ASR и цифровые отпечатки
+
+`asr/asr_ollama.py` делит запись на чанки, строит для каждого чанка
+Chromaprint через `pyacoustid` и сохраняет результат в SQLite `radio.db`, в
+таблицу `audio_chunk_fingerprints`. Границы чанка и путь исходной записи входят
+в уникальный ключ, поэтому повторная обработка обновляет существующую запись.
+
+Для работы `pyacoustid` нужен backend Chromaprint: установите `fpcalc` и
+добавьте его в `PATH` либо установите `libchromaprint` для активного Python
+окружения. Сам пакет Python устанавливается из `reqirements`.
+
+
+# 3. Usage
+
+```
+.\.venv\Scripts\python.exe .\recorder\recorder.py --stream-url https://radio-stream --output-dir radio-name 
+```
+
