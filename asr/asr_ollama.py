@@ -5,12 +5,13 @@ from pathlib import Path
 import av
 import ollama
 
+from fingerprint import fingerprint_and_save_chunk
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL = "hf.co/foryoung365/Qwen3-ASR-1.7B-Q4_K_M-GGUF:Q4_K_M"
 CHUNK_SECONDS = 6
 OVERLAP_SECONDS = 1
-
 
 
 def build_recording_name(recording_name, recording_time, duration_minutes):
@@ -147,6 +148,12 @@ def split_audio_chunk(audio_file_path, start_seconds, end_seconds):
             for packet in output_stream.encode(None):
                 output_container.mux(packet)
 
+    if output_path.stat().st_size <= 44:
+        output_path.unlink()
+        raise ValueError(
+            f"Audio chunk is empty: {audio_file_path} ({start_seconds}-{end_seconds}s)"
+        )
+
     return output_path
 
 
@@ -178,7 +185,12 @@ def transcribe_via_ollama(audio_file_path, start_seconds=None, end_seconds=None)
     return text.replace('language Russian<asr_text>', ' ')
 
 
-def transcribe_chunked_audio(audio_file_path, chunk_seconds=CHUNK_SECONDS, overlap_seconds=OVERLAP_SECONDS):
+def transcribe_chunked_audio(
+    audio_file_path,
+    chunk_seconds=CHUNK_SECONDS,
+    overlap_seconds=OVERLAP_SECONDS,
+    db_path=None,
+):
     total_duration = get_audio_duration(audio_file_path)
     segments = []
 
@@ -186,10 +198,24 @@ def transcribe_chunked_audio(audio_file_path, chunk_seconds=CHUNK_SECONDS, overl
         total_duration, chunk_seconds=chunk_seconds, overlap_seconds=overlap_seconds
     ):
         chunk_path = split_audio_chunk(audio_file_path, start_seconds, end_seconds)
+        processing_succeeded = False
         try:
+            fingerprint_duration, fingerprint = fingerprint_and_save_chunk(
+                chunk_path,
+                audio_file_path,
+                start_seconds,
+                end_seconds,
+                db_path=db_path or BASE_DIR / "radio.db",
+            )
             text = transcribe_via_ollama(chunk_path, start_seconds, end_seconds)
+            processing_succeeded = True
+        except Exception as error:
+            raise RuntimeError(
+                f"Could not process audio chunk {chunk_path} "
+                f"({start_seconds}-{end_seconds}s). The chunk was kept for inspection."
+            ) from error
         finally:
-            if chunk_path.exists():
+            if chunk_path.exists() and processing_succeeded:
                 chunk_path.unlink()
 
         segments.append(
@@ -197,6 +223,8 @@ def transcribe_chunked_audio(audio_file_path, chunk_seconds=CHUNK_SECONDS, overl
                 "start": start_seconds,
                 "end": end_seconds,
                 "text": text,
+                "fingerprint_duration": fingerprint_duration,
+                "fingerprint": fingerprint,
             }
         )
 
