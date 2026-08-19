@@ -1,6 +1,14 @@
+"""
+This script detects advertisements in radio transcriptions using the Ollama API.
+It processes transcriptions from a specified radio station and date,
+and saves the detected advertisement segments into a JSON file.
+Usage:
+	python adetector.py --station dubna-avtoradio --recording_date 2026-08-18 --recording_time 18-14-00"""
 import argparse
 import json
+import logging
 from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import ollama
@@ -8,6 +16,43 @@ import ollama
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL = "gemma4:26b"
+
+# Set in main() once the station is known.
+LOGGER = None
+
+
+def setup_logger(station):
+	log_dir = BASE_DIR / "detector" / "text" / station / "logs"
+	log_dir.mkdir(parents=True, exist_ok=True)
+
+	logger = logging.getLogger(f"adetector.{station}")
+	logger.setLevel(logging.INFO)
+	logger.propagate = False
+
+	if logger.handlers:
+		return logger
+
+	handler = TimedRotatingFileHandler(
+		log_dir / "adetector.log",
+		when="midnight",
+		interval=1,
+		backupCount=30,
+		encoding="utf-8",
+	)
+	handler.suffix = "%Y-%m-%d"
+
+	formatter = logging.Formatter(
+		"%(asctime)s | %(levelname)s | %(message)s",
+		"%Y-%m-%d %H:%M:%S",
+	)
+	handler.setFormatter(formatter)
+	logger.addHandler(handler)
+
+	console_handler = logging.StreamHandler()
+	console_handler.setFormatter(formatter)
+	logger.addHandler(console_handler)
+
+	return logger
 
 
 def normalize_recording_filename(recording_name):
@@ -25,17 +70,27 @@ def normalize_recording_filename(recording_name):
 	return filename
 
 
+def get_transcription_dir_path(station, recording_date):
+	return BASE_DIR / "asr" / "text" / station / recording_date
+
+
 def get_transcription_path(station, recording_date, recording_name):
 	filename = normalize_recording_filename(recording_name)
 
-	return (
-		BASE_DIR
-		/ "asr"
-		/ "text"
-		/ station
-		/ recording_date
-		/ f"{filename}.txt"
-	)
+	return get_transcription_dir_path(station, recording_date) / f"{filename}.txt"
+
+
+def find_transcription_files(station, recording_date):
+	"""Return every transcription (in order) inside asr/text/<station>/<date>/."""
+	transcription_dir = get_transcription_dir_path(station, recording_date)
+	if not transcription_dir.is_dir():
+		raise FileNotFoundError(f"Transcription folder not found: {transcription_dir}")
+
+	transcription_paths = sorted(transcription_dir.glob("*.txt"))
+	if not transcription_paths:
+		raise FileNotFoundError(f"No transcriptions found in: {transcription_dir}")
+
+	return transcription_paths
 
 
 def get_detection_path(station, recording_date, recording_name):
@@ -112,39 +167,50 @@ def save_detection(detection_path, detection):
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
 	parser.add_argument(
-		"station",
-		nargs="?",
+		"--station",
 		default="dubna-marusya",
 		help="Radio station directory name",
 	)
 	parser.add_argument(
-		"recording_time",
-		nargs="?",
-		default="18-14-00",
-		help="Recording start time in HH-MM-SS format",
-	)
-	parser.add_argument(
-		"recording_date",
-		nargs="?",
+		"--recording_date",
 		default="2026-08-18",
 		help="Recording date folder in YYYY-MM-DD format",
 	)
+	parser.add_argument(
+		"--recording_time",
+		default=None,
+		help=(
+			"Recording start time in HH-MM-SS format; "
+			"omit to process every transcription in the date folder"
+		),
+	)
 	args = parser.parse_args()
 
-	try:
-		transcription_path = get_transcription_path(
-			args.station, args.recording_date, args.recording_time
-		)
-		if not transcription_path.is_file():
-			raise FileNotFoundError(f"Transcription not found: {transcription_path}")
+	LOGGER = setup_logger(args.station)
 
-		transcription = transcription_path.read_text(encoding="utf-8")
-		detection = detect_advertisements(transcription)
-		detection_path = get_detection_path(
-			args.station, args.recording_date, args.recording_time
-		)
-		save_detection(detection_path, detection)
-		print(f"Advertisements found: {len(detection['advertisements'])}")
-		print(f"Detection saved to: {detection_path}")
+	try:
+		if args.recording_time:
+			transcription_paths = [
+				get_transcription_path(args.station, args.recording_date, args.recording_time)
+			]
+		else:
+			transcription_paths = find_transcription_files(args.station, args.recording_date)
 	except Exception as error:
-		print(f"Error: {error}")
+		LOGGER.error(f"Error: {error}")
+		transcription_paths = []
+
+	for transcription_path in transcription_paths:
+		try:
+			if not transcription_path.is_file():
+				raise FileNotFoundError(f"Transcription not found: {transcription_path}")
+
+			transcription = transcription_path.read_text(encoding="utf-8")
+			detection = detect_advertisements(transcription)
+			detection_path = get_detection_path(
+				args.station, args.recording_date, transcription_path.stem
+			)
+			save_detection(detection_path, detection)
+			LOGGER.info(f"Advertisements found: {len(detection['advertisements'])}")
+			LOGGER.info(f"Detection saved to: {detection_path}")
+		except Exception as error:
+			LOGGER.error(f"Error processing {transcription_path}: {error}")

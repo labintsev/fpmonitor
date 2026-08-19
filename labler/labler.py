@@ -41,16 +41,26 @@ def get_source_audio_path(station, recording_date, recording_time):
 	)
 
 
+def get_detection_dir_path(station, recording_date):
+	return BASE_DIR / "detector" / "text" / station / recording_date
+
+
 def get_detection_path(station, recording_date, recording_time):
 	recording_start = normalize_recording_time(recording_time)
-	return (
-		BASE_DIR
-		/ "detector"
-		/ "text"
-		/ station
-		/ recording_date
-		/ f"{recording_start:%H-%M-%S}.json"
-	)
+	return get_detection_dir_path(station, recording_date) / f"{recording_start:%H-%M-%S}.json"
+
+
+def find_detection_files(station, recording_date):
+	"""Return every detection file (in order) inside detector/text/<station>/<date>/."""
+	detection_dir = get_detection_dir_path(station, recording_date)
+	if not detection_dir.is_dir():
+		raise FileNotFoundError(f"Detection folder not found: {detection_dir}")
+
+	detection_paths = sorted(detection_dir.glob("*.json"))
+	if not detection_paths:
+		raise FileNotFoundError(f"No detection files found in: {detection_dir}")
+
+	return detection_paths
 
 
 def get_label_audio_path(station, recording_date, ad_start):
@@ -219,28 +229,40 @@ if __name__ == "__main__":
 	)
 	parser.add_argument(
 		"--station",
-		nargs="?",
 		default="dubna-marusya",
 		help="Radio station directory name",
 	)
 	parser.add_argument(
-		"--recording_time",
-		nargs="?",
-		default="18-14-00",
-		help="Recording start time in HH-MM-SS format",
-	)
-	parser.add_argument(
 		"--recording_date",
-		nargs="?",
 		default="2026-08-18",
 		help="Recording date folder in YYYY-MM-DD format",
+	)
+	parser.add_argument(
+		"--recording_time",
+		default=None,
+		help=(
+			"Recording start time in HH-MM-SS format; "
+			"omit to process every detection file in the date folder"
+		),
 	)
 	args = parser.parse_args()
 
 	try:
-		saved_paths = label_advertisements(args.station, args.recording_date, args.recording_time)
-		print(f"Advertisements saved: {len(saved_paths)}")
-		for path in saved_paths:
-			print(f" - {path}")
+		if args.recording_time:
+			recording_times = [args.recording_time]
+		else:
+			recording_times = [
+				path.stem for path in find_detection_files(args.station, args.recording_date)
+			]
 	except Exception as error:
 		print(f"Error: {error}")
+		recording_times = []
+
+	for recording_time in recording_times:
+		try:
+			saved_paths = label_advertisements(args.station, args.recording_date, recording_time)
+			print(f"Advertisements saved: {len(saved_paths)}")
+			for path in saved_paths:
+				print(f" - {path}")
+		except Exception as error:
+			print(f"Error processing {recording_time}: {error}")
