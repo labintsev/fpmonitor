@@ -36,6 +36,10 @@ RECORDING_WINDOWS = [
     (44, 51),
 ]
 
+# Only record between 06:00 and 23:59; the last window in hour 23 ends at 23:51.
+ACTIVE_START_HOUR = 6
+ACTIVE_END_HOUR = 23
+
 READ_TIMEOUT = 30
 TARGET_SAMPLE_RATE = 16000
 TARGET_LAYOUT = "stereo"
@@ -82,6 +86,11 @@ def setup_logger(log_dir, log_file):
 # HELPERS
 # ============================================================
 
+def is_active_hour(dt):
+    """Whether dt falls within the daily 06:00-23:59 recording period."""
+    return ACTIVE_START_HOUR <= dt.hour <= ACTIVE_END_HOUR
+
+
 def get_current_window(now):
     """
     Returns:
@@ -92,6 +101,9 @@ def get_current_window(now):
         HH:15 -> HH:25
         HH:45 -> HH:50
     """
+
+    if not is_active_hour(now):
+        return None
 
     base = now.replace(second=0, microsecond=0)
 
@@ -119,9 +131,6 @@ def get_current_window(now):
 
 
 def get_next_window(now):
-    """
-    Returns the next recording window.
-    """
     hour_base = now.replace(
         minute=0,
         second=0,
@@ -130,9 +139,12 @@ def get_next_window(now):
 
     candidates = []
 
-    # Check windows in the current hour and the next hour.
-    for hour_offset in (0, 1):
+    # Look up to two days ahead so we can skip past inactive hours (00:00-05:59).
+    for hour_offset in range(0, 48):
         window_hour = hour_base + timedelta(hours=hour_offset)
+
+        if not is_active_hour(window_hour):
+            continue
 
         for start_minute, end_minute in RECORDING_WINDOWS:
 
