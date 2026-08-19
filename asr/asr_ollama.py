@@ -1,5 +1,15 @@
+"""
+ASR (Automatic Speech Recognition) module for processing audio recordings and generating timestamped transcriptions.
+This script uses the `ollama` library to transcribe audio segments into text.
+If recording_time is provided, it transcribes a single recording; 
+otherwise, it processes all recordings for the specified date.
+Usage:
+    python asr/asr_ollama.py --station dubna-marusya --recording_date 2026-08-18 --recording_time 18-14-00
+"""
 import argparse
+import logging
 from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import av
@@ -13,27 +23,69 @@ MODEL = "hf.co/foryoung365/Qwen3-ASR-1.7B-Q4_K_M-GGUF:Q4_K_M"
 CHUNK_SECONDS = 6
 OVERLAP_SECONDS = 1
 
+# Bound each chat call so a stuck/runaway generation can't hang the whole run.
+CHAT_TIMEOUT_SECONDS = 120
+CHAT_MAX_TOKENS = 512
+OLLAMA_CLIENT = ollama.Client(timeout=CHAT_TIMEOUT_SECONDS)
 
-def find_audio_path(audio_file):
-    audio_path = Path(audio_file)
-    if not audio_path.is_absolute():
-        audio_path = BASE_DIR / audio_path
-    audio_path = audio_path.resolve()
+# Set in main() once the station is known.
+LOGGER = None
 
-    audio_root = (BASE_DIR / "recorder" / "audio").resolve()
-    try:
-        audio_path.relative_to(audio_root)
-    except ValueError as error:
-        raise ValueError(
-            "Audio file must be located in recorder/audio/<station>/<date>/"
-        ) from error
 
-    if audio_path.suffix.lower() != ".mp3":
-        raise ValueError(f"Audio file must have an .mp3 extension: {audio_path}")
-    if not audio_path.is_file():
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+def setup_logger(station):
+	log_dir = BASE_DIR / "asr" / "text" / station / "logs"
+	log_dir.mkdir(parents=True, exist_ok=True)
 
-    return audio_path
+	logger = logging.getLogger(f"asr_ollama.{station}")
+	logger.setLevel(logging.INFO)
+	logger.propagate = False
+
+	if logger.handlers:
+		return logger
+
+	handler = TimedRotatingFileHandler(
+		log_dir / "asr_ollama.log",
+		when="midnight",
+		interval=1,
+		backupCount=30,
+		encoding="utf-8",
+	)
+	handler.suffix = "%Y-%m-%d"
+
+	formatter = logging.Formatter(
+		"%(asctime)s | %(levelname)s | %(message)s",
+		"%Y-%m-%d %H:%M:%S",
+	)
+	handler.setFormatter(formatter)
+	logger.addHandler(handler)
+
+	console_handler = logging.StreamHandler()
+	console_handler.setFormatter(formatter)
+	logger.addHandler(console_handler)
+
+	return logger
+
+
+def get_audio_dir_path(station, recording_date):
+    return BASE_DIR / "recorder" / "audio" / station / recording_date
+
+
+def get_audio_path(station, recording_date, recording_time):
+    recording_start = get_recording_start_time(recording_time)
+    return get_audio_dir_path(station, recording_date) / f"{recording_start:%H-%M-%S}.mp3"
+
+
+def find_audio_files(station, recording_date):
+    """Return every recording (in order) inside recorder/audio/<station>/<date>/."""
+    audio_dir = get_audio_dir_path(station, recording_date)
+    if not audio_dir.is_dir():
+        raise FileNotFoundError(f"Recording folder not found: {audio_dir}")
+
+    audio_paths = sorted(audio_dir.glob("*.mp3"))
+    if not audio_paths:
+        raise FileNotFoundError(f"No mp3 recordings found in: {audio_dir}")
+
+    return audio_paths
 
 
 def get_transcription_path(audio_file_path):
@@ -168,7 +220,7 @@ def split_audio_chunk(audio_file_path, start_seconds, end_seconds):
 
 
 def transcribe_via_ollama(audio_file_path, start_seconds=None, end_seconds=None):
-    print(f"📡 Connecting to local Ollama instance for segment {start_seconds}-{end_seconds}...")
+    LOGGER.info(f"📡 Connecting to local Ollama instance for segment {start_seconds}-{end_seconds}...")
 
     if not Path(audio_file_path).is_file():
         raise FileNotFoundError(f"Audio file not found at {audio_file_path}")
@@ -180,7 +232,7 @@ def transcribe_via_ollama(audio_file_path, start_seconds=None, end_seconds=None)
             f"{format_timestamp(end_seconds)}."
         )
 
-    response = ollama.chat(
+    response = OLLAMA_CLIENT.chat(
         model=MODEL,
         messages=[
             {
@@ -189,6 +241,11 @@ def transcribe_via_ollama(audio_file_path, start_seconds=None, end_seconds=None)
                 "images": [str(audio_file_path)],
             }
         ],
+        options={
+            "num_predict": CHAT_MAX_TOKENS,
+            "temperature": 0,
+        },
+        keep_alive="10m",
     )
 
     text = response["message"]["content"].strip()
@@ -220,10 +277,11 @@ def transcribe_chunked_audio(
             text = transcribe_via_ollama(chunk_path, start_seconds, end_seconds)
             processing_succeeded = True
         except Exception as error:
-            raise RuntimeError(
+            LOGGER.error(f"❌ Error processing {audio_file_path}: {error}")
+            LOGGER.error(
                 f"Could not process audio chunk {chunk_path} "
                 f"({start_seconds}-{end_seconds}s). The chunk was kept for inspection."
-            ) from error
+            )
         finally:
             if chunk_path.exists() and processing_succeeded:
                 chunk_path.unlink()
@@ -266,10 +324,22 @@ def save_transcription(audio_file_path, segments):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "audio_file",
-        nargs="?",
-        default="recorder/audio/dubna-marusya/2026-08-18/18-14-00.mp3",
-        help="Path to the MP3 file, relative to the project root",
+        "--station",
+        default="dubna-marusya",
+        help="Radio station directory name",
+    )
+    parser.add_argument(
+        "--recording_date",
+        default="2026-08-18",
+        help="Recording date folder in YYYY-MM-DD format",
+    )
+    parser.add_argument(
+        "--recording_time",
+        default=None,
+        help=(
+            "Recording start time in HH-MM-SS format; "
+            "omit to transcribe every recording in the date folder"
+        ),
     )
     parser.add_argument(
         "--chunk-seconds",
@@ -285,15 +355,27 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    LOGGER = setup_logger(args.station)
+
     try:
-        audio_path = find_audio_path(args.audio_file)
+        # Check if recording_time is provided; if so, transcribe that specific recording.
+        # Otherwise, find all recordings for the specified date.
+        if args.recording_time:
+            audio_paths = [get_audio_path(args.station, args.recording_date, args.recording_time)]
+        else:
+            audio_paths = find_audio_files(args.station, args.recording_date)
+    except Exception as error:
+        LOGGER.error(f"❌ Error: {error}")
+        audio_paths = []
+
+    for audio_path in audio_paths:
+        if not audio_path.is_file():
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
         segments = transcribe_chunked_audio(
             audio_path,
             chunk_seconds=args.chunk_seconds,
             overlap_seconds=args.overlap_seconds,
         )
         output_path = save_transcription(audio_path, segments)
-        print(f"\n💾 Timestamped transcription saved to: {output_path}")
-        print(f"✅ Processed {len(segments)} chunks with {args.chunk_seconds}s length and {args.overlap_seconds}s overlap")
-    except Exception as error:
-        print(f"❌ Error: {error}")
+        LOGGER.info(f"💾 Timestamped transcription saved to: {output_path}")
+        LOGGER.info(f"✅ Processed {len(segments)} chunks with {args.chunk_seconds}s length and {args.overlap_seconds}s overlap")
