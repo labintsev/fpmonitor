@@ -4,7 +4,7 @@ extracts advertisement segments based on detection data,
 and saves them into a database. 
 It uses the `av` library for audio processing and `sqlite3` for database management.
 Usage:
-    python labler.py --station dubna-avtoradio --recording_time 18-14-00 --recording_date 2026-08-18
+    python labler/labler.py --station dubna-avtoradio --recording_date 2026-08-18 --recording_time 18-14-00 
 """
 import argparse
 import json
