@@ -1,3 +1,8 @@
+"""
+Radio stream recorder
+Usage:
+    python recorder/recorder.py --stream-url https://stream.autoradio.ru --output-dir autoradio --recording-windows 14-21,44-51
+"""
 import argparse
 import os
 import time
@@ -85,6 +90,34 @@ def setup_logger(log_dir, log_file):
 # ============================================================
 # HELPERS
 # ============================================================
+
+def parse_recording_windows(value):
+    """Parse recording windows in the form ``14-21,44-51``."""
+
+    windows = []
+
+    for item in value.split(","):
+        try:
+            start_minute, end_minute = map(int, item.strip().split("-"))
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                f"invalid recording window {item!r}; use START-END"
+            ) from error
+
+        if not 0 <= start_minute <= 59 or not 0 <= end_minute <= 59:
+            raise argparse.ArgumentTypeError(
+                f"recording window {item!r} must use minutes from 0 to 59"
+            )
+
+        windows.append((start_minute, end_minute))
+
+    if not windows:
+        raise argparse.ArgumentTypeError(
+            "at least one recording window is required"
+        )
+
+    return windows
+
 
 def is_active_hour(dt):
     """Whether dt falls within the daily 06:00-23:59 recording period."""
@@ -385,7 +418,7 @@ def record_stream(start_time, end_time):
 # ============================================================
 
 def main():
-    global STREAM_URL, AUDIO_STREAM_TYPE, AUDIO_DIR, LOGGER
+    global STREAM_URL, AUDIO_STREAM_TYPE, AUDIO_DIR, LOGGER, RECORDING_WINDOWS
 
     parser = argparse.ArgumentParser(description="Record the radio stream on schedule")
     parser.add_argument(
@@ -404,10 +437,17 @@ def main():
         default="autoradio",
         help="Directory where dated recordings and logs are stored",
     )
+    parser.add_argument(
+        "--recording-windows",
+        type=parse_recording_windows,
+        default=RECORDING_WINDOWS,
+        help="Recording windows as START-END pairs, e.g. 14-21,44-51",
+    )
     args = parser.parse_args()
 
     STREAM_URL = args.stream_url
     AUDIO_STREAM_TYPE = args.stream_type
+    RECORDING_WINDOWS = args.recording_windows
     AUDIO_DIR = Path(BASE_DIR / "audio" / args.output_dir)
     log_dir = AUDIO_DIR / "logs"
     log_file = log_dir / "recorder.log"

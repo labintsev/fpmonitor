@@ -60,3 +60,12 @@ Chromaprint через `pyacoustid` и сохраняет результат в 
 .\.venv\Scripts\python.exe .\recorder\recorder.py --stream-url https://radio-stream --output-dir radio-name 
 ```
 
+Расписание можно задать аргументом `--recording-windows`. Окна указываются
+через запятую в формате `НАЧАЛО-КОНЕЦ` (минуты внутри часа):
+
+```
+.\.venv\Scripts\python.exe .\recorder\recorder.py --recording-windows 14-21,44-51
+```
+
+Без этого аргумента используются окна `14-21` и `44-51`.
+
