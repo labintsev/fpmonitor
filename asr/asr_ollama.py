@@ -14,6 +14,7 @@ from pathlib import Path
 
 import av
 import ollama
+from tqdm import tqdm
 
 from fingerprint import fingerprint_and_save_chunk
 
@@ -220,8 +221,6 @@ def split_audio_chunk(audio_file_path, start_seconds, end_seconds):
 
 
 def transcribe_via_ollama(audio_file_path, start_seconds=None, end_seconds=None):
-    LOGGER.info(f"📡 Connecting to local Ollama instance for segment {start_seconds}-{end_seconds}...")
-
     if not Path(audio_file_path).is_file():
         raise FileNotFoundError(f"Audio file not found at {audio_file_path}")
 
@@ -261,8 +260,14 @@ def transcribe_chunked_audio(
     total_duration = get_audio_duration(audio_file_path)
     segments = []
 
-    for start_seconds, end_seconds in build_chunk_ranges(
+    chunk_ranges = build_chunk_ranges(
         total_duration, chunk_seconds=chunk_seconds, overlap_seconds=overlap_seconds
+    )
+    LOGGER.info(f"Processing {len(chunk_ranges)} chunks for {audio_file_path} ({total_duration:.2f}s total)")
+    for start_seconds, end_seconds in tqdm(
+        chunk_ranges,
+        desc="ASR chunks",
+        unit="chunk",
     ):
         chunk_path = split_audio_chunk(audio_file_path, start_seconds, end_seconds)
         processing_succeeded = False

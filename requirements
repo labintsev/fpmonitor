@@ -1,4 +1,5 @@
 flask
 av
 ollama
+tqdm
 pyacoustid # with fpcalc backend

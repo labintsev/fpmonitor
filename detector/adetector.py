@@ -3,7 +3,8 @@ This script detects advertisements in radio transcriptions using the Ollama API.
 It processes transcriptions from a specified radio station and date,
 and saves the detected advertisement segments into a JSON file.
 Usage:
-	python detector/adetector.py --station dubna-avtoradio --recording_date 2026-08-18 --recording_time 18-14-00"""
+	python detector/adetector.py --station dubna-avtoradio --recording_date 2026-08-18 --recording_time 18-14-00
+"""
 import argparse
 import json
 import logging
@@ -111,7 +112,8 @@ def build_prompt(transcription):
 Обращай внимание на тему рекламы, в одном чанке может быть конец одной рекламы и начало другой.
 Расшифровка содержит временные метки, оцени временные границы роликов.
 Продолжительность одного ролика обычно составляет от 15 до 40 секунд.
-Верни только корректный JSON без Markdown и без пояснений. Используй схему:
+Верни только корректный JSON без Markdown и без пояснений, на русском языке. 
+Используй схему:
 {{
 	"advertisements": [
 		{{
