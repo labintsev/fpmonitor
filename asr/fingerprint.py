@@ -1,3 +1,10 @@
+"""Audio fingerprinting helpers backed by Chromaprint (via ``acoustid``).
+
+Extracts Chromaprint fingerprints for recorded audio files and stores one
+fingerprint per audio chunk in the SQLite table ``audio_chunk_fingerprints``
+so that later runs can compare chunks across recordings.
+"""
+
 import sqlite3
 from pathlib import Path
 
