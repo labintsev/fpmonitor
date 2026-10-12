@@ -8,19 +8,27 @@ Usage:
 """
 import argparse
 import logging
+import os
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import av
 import ollama
+from dotenv import load_dotenv
 from tqdm import tqdm
 
 from fingerprint import fingerprint_and_save_chunk
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-MODEL = "hf.co/foryoung365/Qwen3-ASR-1.7B-Q4_K_M-GGUF:Q4_K_M"
+
+# Models are configured through the project .env file; see .env.example.
+load_dotenv(BASE_DIR / ".env")
+MODEL = os.getenv(
+	"OLLAMA_ASR_MODEL",
+	"hf.co/foryoung365/Qwen3-ASR-1.7B-Q4_K_M-GGUF:Q4_K_M",
+)
 CHUNK_SECONDS = 6
 OVERLAP_SECONDS = 1
 

@@ -8,15 +8,20 @@ Usage:
 import argparse
 import json
 import logging
+import os
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import ollama
+from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-MODEL = "gemma4:26b"
+
+# Models are configured through the project .env file; see .env.example.
+load_dotenv(BASE_DIR / ".env")
+MODEL = os.getenv("OLLAMA_DETECTOR_MODEL", "gemma4:26b")
 
 # Set in main() once the station is known.
 LOGGER = None

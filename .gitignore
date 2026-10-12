@@ -2,8 +2,9 @@
 *.wav
 *.log*
 *.db
-*.txt
+labler/*.txt
 *.yml
 *.json
 *.pyc
 data/
+.env
